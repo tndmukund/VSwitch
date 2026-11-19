@@ -1,0 +1,110 @@
+name: Build OT Virtual Switch images
+
+# Click: Actions -> "Build OT Virtual Switch images" -> Run workflow.
+# Finished files appear under "Releases" (right side of the repo page) and as run artifacts.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for file names (e.g. 1.1.0)"
+        default: "1.1.0"
+        required: true
+  push:
+    tags: ["v*"]
+
+env:
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+jobs:
+  amd64-image:
+    name: PC / VM image (amd64 .img.xz + .ova)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space (the runner starts with little room)
+        run: | sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost sudo docker image prune --all --force || true df -h /       - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y qemu-utils cloud-guest-utils e2fsprogs xz-utils
+      - name: Build image
+        run: sudo -E bash build/amd64.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: otsw-pc-vm
+          path: out/*
+          compression-level: 0
+          if-no-files-found: error
+
+  raspberry-pi-image:
+    name: Raspberry Pi image (arm64 .img.xz)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: | sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost df -h /       - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y qemu-user-static binfmt-support cloud-guest-utils e2fsprogs xz-utils
+      - name: Build image
+        run: sudo -E bash build/pi.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: otsw-raspberrypi
+          path: out/*
+          compression-level: 0
+          if-no-files-found: error
+
+  linux-deb:
+    name: Linux installer (.deb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash build/deb.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: otsw-linux-deb
+          path: out/*.deb
+          if-no-files-found: error
+
+  tool:
+    name: Switch Tool (${{ matrix.os_name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            os_name: windows
+            sep: ";"
+            out: OT-Switch-Tool.exe
+          - os: ubuntu-latest
+            os_name: linux
+            sep: ":"
+            out: OT-Switch-Tool-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build single-file app
+        shell: bash
+        run: | pip install pyinstaller pyinstaller --onefile --windowed --name OT-Switch-Tool \ --paths app \ --add-data "app/index.html${{ matrix.sep }}." \ --add-data "app/server.py${{ matrix.sep }}." \ launcher/otsw_launcher.py mkdir -p out if [ "${{ matrix.os_name }}" = "windows" ]; then cp dist/OT-Switch-Tool.exe out/OT-Switch-Tool.exe; else cp dist/OT-Switch-Tool out/OT-Switch-Tool-linux; fi       - uses: actions/upload-artifact@v4
+        with:
+          name: otsw-tool-${{ matrix.os_name }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [amd64-image, raspberry-pi-image, linux-deb, tool]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+          merge-multiple: true
+      - run: ls -lh dl
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || format('v{0}-build{1}', github.event.inputs.version, github.run_number) }}
+          name: OT Virtual Switch ${{ github.event.inputs.version || github.ref_name }}
+          files: dl/*
+          body: | Download the file for your platform - see README.md ("Which file do I need?"). - `*.img.xz` (amd64): flash to a USB stick/SSD with balenaEtcher, boot a PC/laptop from it - `*.ova`: import into VMware ESXi / Workstation / Fusion - `*raspberrypi-arm64.img.xz`: flash to an SD card with Raspberry Pi Imager ("Use custom") - `.deb`: install on Ubuntu/Debian - `OT-Switch-Tool.exe` / `OT-Switch-Tool-linux`: find the switch on your network / try the demo
