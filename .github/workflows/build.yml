@@ -29,7 +29,7 @@ jobs:
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost && df -h /
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y qemu-utils cloud-guest-utils e2fsprogs xz-utils
+        run: for i in 1 2 3 4 5; do sudo apt-get update && sudo apt-get install -y -o Acquire::Retries=5 qemu-utils cloud-guest-utils e2fsprogs xz-utils && break; echo retry $i; sleep 30; done; which qemu-img growpart xz
       - name: Build image
         run: sudo bash build/amd64.sh "$VERSION"
       - uses: actions/upload-artifact@v4
@@ -53,7 +53,7 @@ jobs:
         with:
           platforms: arm64
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y cloud-guest-utils e2fsprogs xz-utils
+        run: for i in 1 2 3 4 5; do sudo apt-get update && sudo apt-get install -y -o Acquire::Retries=5 cloud-guest-utils e2fsprogs xz-utils && break; echo retry $i; sleep 30; done; which growpart xz
       - name: Build image
         run: sudo bash build/pi.sh "$VERSION"
       - uses: actions/upload-artifact@v4
