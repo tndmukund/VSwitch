@@ -13,54 +13,70 @@ on:
 env:
   VERSION: ${{ github.event.inputs.version || github.ref_name }}
 
+defaults:
+  run:
+    working-directory: src/otswitch
+
 jobs:
   amd64-image:
     name: PC and VM image (amd64 img.xz and ova)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Unpack project
+        working-directory: ${{ github.workspace }}
+        run: unzip -q otswitch.zip -d src && ls src/otswitch
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost && df -h /
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y qemu-utils cloud-guest-utils e2fsprogs xz-utils
       - name: Build image
-        run: sudo -E bash build/amd64.sh "$VERSION"
+        run: sudo bash build/amd64.sh "$VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: otsw-pc-vm
-          path: out/*
+          path: src/otswitch/out/*
           compression-level: 0
           if-no-files-found: error
 
   raspberry-pi-image:
     name: Raspberry Pi image (arm64 img.xz)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Unpack project
+        working-directory: ${{ github.workspace }}
+        run: unzip -q otswitch.zip -d src && ls src/otswitch
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost && df -h /
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y qemu-user-static binfmt-support cloud-guest-utils e2fsprogs xz-utils
+        run: sudo apt-get update && sudo apt-get install -y cloud-guest-utils e2fsprogs xz-utils
       - name: Build image
-        run: sudo -E bash build/pi.sh "$VERSION"
+        run: sudo bash build/pi.sh "$VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: otsw-raspberrypi
-          path: out/*
+          path: src/otswitch/out/*
           compression-level: 0
           if-no-files-found: error
 
   linux-deb:
     name: Linux installer (deb)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Unpack project
+        working-directory: ${{ github.workspace }}
+        run: unzip -q otswitch.zip -d src && ls src/otswitch
       - name: Build deb
         run: bash build/deb.sh "$VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: otsw-linux-deb
-          path: out/*.deb
+          path: src/otswitch/out/*.deb
           if-no-files-found: error
 
   tool:
@@ -73,7 +89,7 @@ jobs:
             os_name: windows
             sep: ";"
             exe: OT-Switch-Tool
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             os_name: linux
             sep: ":"
             exe: OT-Switch-Tool-linux
@@ -83,27 +99,32 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Unpack project
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: python -m zipfile -e otswitch.zip src
       - name: Build single-file app
         shell: bash
         run: pip install pyinstaller && pyinstaller --onefile --windowed --name ${{ matrix.exe }} --paths app --add-data "app/index.html${{ matrix.sep }}." --add-data "app/server.py${{ matrix.sep }}." launcher/otsw_launcher.py
       - uses: actions/upload-artifact@v4
         with:
           name: otsw-tool-${{ matrix.os_name }}
-          path: dist/*
+          path: src/otswitch/dist/*
           if-no-files-found: error
 
   release:
     name: Publish release
     needs: [amd64-image, raspberry-pi-image, linux-deb, tool]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: dl
+          path: ${{ github.workspace }}/dl
           merge-multiple: true
       - name: List files
+        working-directory: ${{ github.workspace }}
         run: ls -lh dl
       - uses: softprops/action-gh-release@v2
         with:
