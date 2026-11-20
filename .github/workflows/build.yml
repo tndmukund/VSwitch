@@ -5,7 +5,7 @@ on:
     inputs:
       version:
         description: "Version label for file names"
-        default: "1.2.0"
+        default: "1.4.0"
         required: true
   push:
     tags: ["v*"]
@@ -105,10 +105,32 @@ jobs:
         run: python -m zipfile -e otswitch.zip src
       - name: Build single-file app
         shell: bash
-        run: pip install pyinstaller && pyinstaller --onefile --windowed --name ${{ matrix.exe }} --paths app --add-data "app/index.html${{ matrix.sep }}." --add-data "app/server.py${{ matrix.sep }}." launcher/otsw_launcher.py
+        run: pip install pyinstaller && pyinstaller --onefile --windowed --name ${{ matrix.exe }} --paths app --add-data "app/index.html${{ matrix.sep }}." --add-data "app/server.py${{ matrix.sep }}." --add-data "app/flows.py${{ matrix.sep }}." --add-data "app/license.py${{ matrix.sep }}." --hidden-import flows --hidden-import license launcher/otsw_launcher.py
       - uses: actions/upload-artifact@v4
         with:
           name: otsw-tool-${{ matrix.os_name }}
+          path: src/otswitch/dist/*
+          if-no-files-found: error
+
+  vendor-licensor:
+    name: Licence generator (vendor only, windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unpack project
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: python -m zipfile -e otswitch.zip src
+      - name: Build licence generator
+        shell: bash
+        working-directory: src/otswitch
+        run: pip install pyinstaller && pyinstaller --onefile --windowed --name OT-Switch-Licence-Generator --paths app tools/otsw_licensor.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vendor-licensor-windows
           path: src/otswitch/dist/*
           if-no-files-found: error
 
@@ -122,10 +144,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: ${{ github.workspace }}/dl
+          pattern: otsw-*
           merge-multiple: true
       - name: List files
         working-directory: ${{ github.workspace }}
         run: ls -lh dl
+      - name: Pack everything into one zip
+        working-directory: ${{ github.workspace }}
+        run: printf 'OT Virtual Switch - what is in this zip\n\notsw-*-amd64.ova VMware ESXi / Workstation (import as a VM)\notsw-*-amd64.img.xz PC / laptop / USB or any hypervisor (flash with balenaEtcher or Rufus)\notsw-*-raspberrypi-arm64.img.xz Raspberry Pi 3/4/5 (flash with Raspberry Pi Imager)\not-virtual-switch_*_all.deb Ubuntu/Debian installer\nOT-Switch-Tool.exe Windows finder and demo\nOT-Switch-Tool-linux Linux finder and demo\n' > dl/READ-ME.txt && cd dl && zip -0 -r ../OT-Virtual-Switch-all.zip . && ls -lh ../OT-Virtual-Switch-all.zip && if [ $(stat -c%s ../OT-Virtual-Switch-all.zip) -lt 1900000000 ]; then mv ../OT-Virtual-Switch-all.zip ./; else echo "all-in-one zip is over the 2 GB release limit - skipped, use the separate files"; fi
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'push' && github.ref_name || format('v{0}-build{1}', github.event.inputs.version, github.run_number) }}
